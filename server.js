@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import spawn from "cross-spawn";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -195,6 +195,19 @@ server.registerTool(
   },
 );
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+function isMain() {
+  if (!process.argv[1]) return false;
+  try {
+    const self = fileURLToPath(import.meta.url);
+    const invoked = path.resolve(process.argv[1]);
+    return process.platform === "win32"
+      ? self.toLowerCase() === invoked.toLowerCase()
+      : self === invoked;
+  } catch {
+    return false;
+  }
+}
+
+if (isMain()) {
   await server.connect(new StdioServerTransport());
 }

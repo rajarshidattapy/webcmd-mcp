@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { readFileSync, unlinkSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { clip, exec, isSkillName } from "./server.js";
+import { clip, exec, isSkillName, parseSkillList, skillsInstalled, webcmdFailed } from "./server.js";
 
 // clip: passthrough under the limit, head+tail above it
 assert.equal(clip("short"), "short");
@@ -80,6 +80,25 @@ assert.equal(isSkillName("..\\secrets"), false);
 assert.equal(isSkillName("foo/bar"), false);
 assert.equal(isSkillName("foo\\bar"), false);
 
+assert.equal(skillsInstalled(path.join(os.tmpdir(), `webcmd-missing-${process.pid}`)), false);
+const readyDir = mkdtempSync(path.join(os.tmpdir(), "webcmd-skills-ready-"));
+mkdirSync(path.join(readyDir, "webcmd-usage"));
+writeFileSync(path.join(readyDir, "webcmd-usage", "SKILL.md"), "name: webcmd-usage\n");
+assert.equal(skillsInstalled(readyDir), true);
+rmSync(readyDir, { recursive: true, force: true });
+const emptyDir = mkdtempSync(path.join(os.tmpdir(), "webcmd-skills-empty-"));
+assert.equal(skillsInstalled(emptyDir), false);
+rmSync(emptyDir, { recursive: true, force: true });
+
+assert.match(webcmdFailed("webcmd skills add", { code: -1, out: "", err: "spawn webcmd ENOENT" }), /not installed or not on PATH/);
+assert.equal(parseSkillList({ code: -1, out: "", err: "spawn webcmd ENOENT" }).ok, false);
+assert.match(parseSkillList({ code: -1, out: "", err: "spawn webcmd ENOENT" }).error, /not installed or not on PATH/);
+assert.deepEqual(parseSkillList({ code: 0, out: "[]", err: "" }).skills, []);
+assert.equal(parseSkillList({ code: 0, out: "[]", err: "" }).ok, true);
+assert.equal(parseSkillList({ code: 0, out: "not json", err: "" }).ok, false);
+assert.equal(parseSkillList({ code: 1, out: "", err: "boom" }).ok, false);
+assert.doesNotMatch(parseSkillList({ code: 1, out: "", err: "boom" }).error, /No skills found/);
+
 const unknown = await client.callTool({ name: "webcmd_skill", arguments: { name: "nope" } });
 assert.equal(unknown.isError, true);
 
@@ -94,4 +113,31 @@ const usage = await client.callTool({ name: "webcmd_skill", arguments: { name: "
 assert.match(usage.content[0].text, /name: webcmd-usage/);
 
 await client.close();
+
+const isolatedSkills = mkdtempSync(path.join(os.tmpdir(), "webcmd-isolated-skills-"));
+const isolatedBin =
+  process.platform === "win32" ? "C:\\Windows\\System32" : "/usr/bin:/bin";
+const isolatedEnv = Object.fromEntries(
+  Object.entries({
+    ...process.env,
+    PATH: isolatedBin,
+    Path: isolatedBin,
+    WEBCMD_SKILLS_DIR: isolatedSkills,
+  }).filter(([, v]) => v != null),
+);
+const isolated = new Client({ name: "test-isolated", version: "0" });
+await isolated.connect(
+  new StdioClientTransport({
+    command: process.execPath,
+    args: ["server.js"],
+    env: isolatedEnv,
+  }),
+);
+const missing = await isolated.callTool({ name: "webcmd_skill", arguments: {} });
+assert.equal(missing.isError, true);
+assert.match(missing.content[0].text, /not installed or not on PATH|webcmd_setup/i);
+assert.doesNotMatch(missing.content[0].text, /No skills found/);
+await isolated.close();
+rmSync(isolatedSkills, { recursive: true, force: true });
+
 console.log("ok");

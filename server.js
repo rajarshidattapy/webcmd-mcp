@@ -89,19 +89,60 @@ function report({ code, out, err }) {
   };
 }
 
-// The bundled skills live under ~/.webcmd/skills once any `skills add` has run.
+export function skillsInstalled(dir = SKILLS_DIR) {
+  return existsSync(path.join(dir, "webcmd-usage", "SKILL.md"));
+}
+
+export function webcmdFailed(cmd, { code, out, err }) {
+  const body = [out.trim(), err.trim()].filter(Boolean).join("\n") || "(no output)";
+  if (code === -1) {
+    return `webcmd is not installed or not on PATH. Run webcmd_setup first.\n${body}`;
+  }
+  return `${cmd} failed (exit ${code})\n${body}`;
+}
+
+export function parseSkillList({ code, out, err }) {
+  if (code !== 0) {
+    return { ok: false, skills: [], error: webcmdFailed("webcmd skills list", { code, out, err }) };
+  }
+  try {
+    const skills = JSON.parse(out);
+    if (!Array.isArray(skills)) {
+      return {
+        ok: false,
+        skills: [],
+        error: "webcmd skills list returned unexpected JSON. Run webcmd_setup first.",
+      };
+    }
+    return { ok: true, skills };
+  } catch {
+    return {
+      ok: false,
+      skills: [],
+      error: "webcmd skills list did not return JSON. Is webcmd installed? Run webcmd_setup first.",
+    };
+  }
+}
+
 async function ensureSkills() {
-  if (existsSync(SKILLS_DIR)) return;
-  await exec("webcmd", ["skills", "add", "--path", SKILLS_DIR, "--json"]);
+  if (skillsInstalled()) return { ok: true };
+  const result = await exec("webcmd", ["skills", "add", "--path", SKILLS_DIR, "--json"], {
+    timeout: 30000,
+  });
+  if (result.code !== 0) {
+    return { ok: false, error: webcmdFailed("webcmd skills add", result) };
+  }
+  if (!skillsInstalled()) {
+    return {
+      ok: false,
+      error: "webcmd skills add completed but no skills were installed. Run webcmd_setup first.",
+    };
+  }
+  return { ok: true };
 }
 
 async function listSkills() {
-  const { out } = await exec("webcmd", ["skills", "list", "-f", "json"]);
-  try {
-    return JSON.parse(out);
-  } catch {
-    return [];
-  }
+  return parseSkillList(await exec("webcmd", ["skills", "list", "-f", "json"], { timeout: 30000 }));
 }
 
 const server = new McpServer(
@@ -151,11 +192,17 @@ server.registerTool(
     },
   },
   async ({ name }) => {
-    await ensureSkills();
+    const ensured = await ensureSkills();
+    if (!ensured.ok) {
+      return { content: [{ type: "text", text: clip(ensured.error) }], isError: true };
+    }
     if (!name) {
-      const skills = await listSkills();
-      const text = skills.length
-        ? skills.map((s) => `- ${s.name} — ${s.description}`).join("\n")
+      const listed = await listSkills();
+      if (!listed.ok) {
+        return { content: [{ type: "text", text: clip(listed.error) }], isError: true };
+      }
+      const text = listed.skills.length
+        ? listed.skills.map((s) => `- ${s.name} — ${s.description}`).join("\n")
         : "No skills found. Run webcmd_setup first.";
       return { content: [{ type: "text", text }] };
     }
@@ -167,12 +214,15 @@ server.registerTool(
     }
     const file = path.join(SKILLS_DIR, name, "SKILL.md");
     if (!existsSync(file)) {
-      const skills = await listSkills();
+      const listed = await listSkills();
+      const available = listed.ok
+        ? listed.skills.map((s) => s.name).join(", ") || "(none)"
+        : listed.error;
       return {
         content: [
           {
             type: "text",
-            text: `Unknown skill '${name}'. Available: ${skills.map((s) => s.name).join(", ") || "(none)"}`,
+            text: `Unknown skill '${name}'. Available: ${available}`,
           },
         ],
         isError: true,
@@ -207,7 +257,9 @@ server.registerTool(
     const doctor = await exec("webcmd", ["doctor"], { timeout: 120000 });
     steps.push(`doctor:\n${(doctor.out || doctor.err).trim()}`);
 
-    await ensureSkills();
+    const ensured = await ensureSkills();
+    if (!ensured.ok) steps.push(`skills:\n${ensured.error}`);
+
     const usage = path.join(SKILLS_DIR, "webcmd-usage", "SKILL.md");
     const guidance = existsSync(usage)
       ? await readFile(usage, "utf8")
@@ -230,7 +282,7 @@ server.registerTool(
           ),
         },
       ],
-      isError: doctor.code !== 0,
+      isError: doctor.code !== 0 || !ensured.ok,
     };
   },
 );

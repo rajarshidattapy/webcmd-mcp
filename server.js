@@ -20,15 +20,36 @@ export function clip(s) {
   return `${s.slice(0, 40000)}\n\n…[truncated ${cut} chars]…\n\n${s.slice(-20000)}`;
 }
 
+function killTree(child) {
+  if (!child.pid) return;
+  if (process.platform === "win32") {
+    spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore" });
+    return;
+  }
+  try {
+    process.kill(-child.pid, "SIGKILL");
+  } catch {
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      // already gone
+    }
+  }
+}
+
 export function exec(cmd, args, { cwd, timeout = 120000 } = {}) {
   return new Promise((resolve) => {
-    const child = spawn(cmd, args, { cwd, env: process.env });
+    const child = spawn(cmd, args, {
+      cwd,
+      env: process.env,
+      detached: process.platform !== "win32",
+    });
     let out = "";
     let err = "";
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill();
+      killTree(child);
     }, timeout);
     child.stdout?.on("data", (d) => (out += d));
     child.stderr?.on("data", (d) => (err += d));

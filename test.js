@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { readFileSync, unlinkSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { clip, exec } from "./server.js";
@@ -19,6 +22,38 @@ assert.match(failed.err, /bad/);
 assert.equal((await exec("definitely-not-a-real-binary-xyz", [])).code, -1);
 const slow = await exec(process.execPath, ["-e", "setInterval(()=>{},1000)"], { timeout: 300 });
 assert.match(slow.err, /timed out/);
+
+// timeout must kill grandchildren (cmd shim / browser children), not just the top PID
+const marker = path.join(os.tmpdir(), `webcmd-mcp-grandchild-${process.pid}`);
+try {
+  unlinkSync(marker);
+} catch {
+  // no leftover
+}
+const nested = await exec(
+  process.execPath,
+  [
+    "-e",
+    `const {spawn}=require('child_process');const fs=require('fs');const c=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});fs.writeFileSync(${JSON.stringify(marker)},String(c.pid));setInterval(()=>{},1000);`,
+  ],
+  { timeout: 400 },
+);
+assert.match(nested.err, /timed out/);
+const grandchildPid = Number(readFileSync(marker, "utf8"));
+assert.ok(grandchildPid > 0);
+await new Promise((r) => setTimeout(r, 800));
+let alive = true;
+try {
+  process.kill(grandchildPid, 0);
+} catch {
+  alive = false;
+}
+assert.equal(alive, false);
+try {
+  unlinkSync(marker);
+} catch {
+  // ignore
+}
 
 // end to end over stdio: the three tools are exposed and webcmd_run reaches the CLI
 const client = new Client({ name: "test", version: "0" });

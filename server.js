@@ -12,12 +12,48 @@ import { z } from "zod";
 const SKILLS_DIR =
   process.env.WEBCMD_SKILLS_DIR || path.join(os.homedir(), ".webcmd", "skills");
 
-const MAX_OUTPUT = 60000;
+const HEAD = 40000;
+const TAIL = 20000;
+const MAX_OUTPUT = HEAD + TAIL;
 
 export function clip(s) {
   if (s.length <= MAX_OUTPUT) return s;
   const cut = s.length - MAX_OUTPUT;
-  return `${s.slice(0, 40000)}\n\n…[truncated ${cut} chars]…\n\n${s.slice(-20000)}`;
+  return `${s.slice(0, HEAD)}\n\n…[truncated ${cut} chars]…\n\n${s.slice(-TAIL)}`;
+}
+
+function cappedBuffer() {
+  let head = "";
+  let tail = "";
+  let skipped = 0;
+  return {
+    push(chunk) {
+      const s = typeof chunk === "string" ? chunk : String(chunk);
+      if (skipped === 0 && head.length + s.length <= MAX_OUTPUT) {
+        head += s;
+        return;
+      }
+      if (skipped === 0) {
+        const all = head + s;
+        head = all.slice(0, HEAD);
+        const rest = all.slice(HEAD);
+        skipped = rest.length - TAIL;
+        tail = rest.slice(-TAIL);
+        return;
+      }
+      const combined = tail + s;
+      if (combined.length > TAIL) {
+        skipped += combined.length - TAIL;
+        tail = combined.slice(-TAIL);
+      } else {
+        tail = combined;
+      }
+    },
+    toString() {
+      if (skipped === 0) return head;
+      return `${head}\n\n…[truncated ${skipped} chars]…\n\n${tail}`;
+    },
+  };
 }
 
 function killTree(child) {
@@ -45,24 +81,25 @@ export function exec(cmd, args, { cwd, timeout = 120000 } = {}) {
       detached: process.platform !== "win32",
       stdio: ["ignore", "pipe", "pipe"],
     });
-    let out = "";
-    let err = "";
     let timedOut = false;
+    const outBuf = cappedBuffer();
+    const errBuf = cappedBuffer();
     const timer = setTimeout(() => {
       timedOut = true;
       killTree(child);
     }, timeout);
-    child.stdout?.on("data", (d) => (out += d));
-    child.stderr?.on("data", (d) => (err += d));
+    child.stdout?.on("data", (d) => outBuf.push(d));
+    child.stderr?.on("data", (d) => errBuf.push(d));
     child.on("error", (e) => {
       clearTimeout(timer);
-      resolve({ code: -1, out, err: `${err}${e.message}` });
+      resolve({ code: -1, out: outBuf.toString(), err: `${errBuf.toString()}${e.message}` });
     });
     child.on("close", (code) => {
       clearTimeout(timer);
+      const err = errBuf.toString();
       resolve({
         code,
-        out,
+        out: outBuf.toString(),
         err: timedOut ? `${err}\n[timed out after ${timeout}ms]` : err,
       });
     });

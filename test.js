@@ -27,6 +27,9 @@ const eof = await exec(
 );
 assert.equal(eof.code, 0);
 assert.match(eof.out, /eof/);
+const huge = await exec(process.execPath, ["-e", "process.stdout.write('x'.repeat(200000))"]);
+assert.ok(huge.out.length < 100000);
+assert.match(huge.out, /truncated 140000 chars/);
 const slow = await exec(process.execPath, ["-e", "setInterval(()=>{},1000)"], { timeout: 300 });
 assert.match(slow.err, /timed out/);
 

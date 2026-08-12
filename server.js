@@ -43,6 +43,7 @@ export function exec(cmd, args, { cwd, timeout = 120000 } = {}) {
       cwd,
       env: process.env,
       detached: process.platform !== "win32",
+      stdio: ["ignore", "pipe", "pipe"],
     });
     let out = "";
     let err = "";

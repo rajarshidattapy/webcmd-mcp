@@ -20,6 +20,13 @@ const failed = await exec(process.execPath, ["-e", "console.error('bad');process
 assert.equal(failed.code, 3);
 assert.match(failed.err, /bad/);
 assert.equal((await exec("definitely-not-a-real-binary-xyz", [])).code, -1);
+const eof = await exec(
+  process.execPath,
+  ["-e", "require('fs').readFileSync(0); console.log('eof')"],
+  { timeout: 2000 },
+);
+assert.equal(eof.code, 0);
+assert.match(eof.out, /eof/);
 const slow = await exec(process.execPath, ["-e", "setInterval(()=>{},1000)"], { timeout: 300 });
 assert.match(slow.err, /timed out/);
 

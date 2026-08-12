@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { clip, exec } from "./server.js";
+import { clip, exec, isSkillName } from "./server.js";
 
 // clip: passthrough under the limit, head+tail above it
 assert.equal(clip("short"), "short");
@@ -66,8 +66,22 @@ assert.deepEqual(names, ["webcmd_run", "webcmd_setup", "webcmd_skill"]);
 const version = await client.callTool({ name: "webcmd_run", arguments: { args: ["--version"] } });
 assert.match(version.content[0].text, /\d+\.\d+\.\d+/);
 
+assert.equal(isSkillName("webcmd-usage"), true);
+assert.equal(isSkillName(".."), false);
+assert.equal(isSkillName("../secrets"), false);
+assert.equal(isSkillName("..\\secrets"), false);
+assert.equal(isSkillName("foo/bar"), false);
+assert.equal(isSkillName("foo\\bar"), false);
+
 const unknown = await client.callTool({ name: "webcmd_skill", arguments: { name: "nope" } });
 assert.equal(unknown.isError, true);
+
+const traversal = await client.callTool({
+  name: "webcmd_skill",
+  arguments: { name: "../.ssh" },
+});
+assert.equal(traversal.isError, true);
+assert.match(traversal.content[0].text, /Invalid skill name/);
 
 const usage = await client.callTool({ name: "webcmd_skill", arguments: { name: "webcmd-usage" } });
 assert.match(usage.content[0].text, /name: webcmd-usage/);

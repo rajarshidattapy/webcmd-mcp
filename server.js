@@ -68,6 +68,18 @@ export function exec(cmd, args, { cwd, timeout = 120000 } = {}) {
   });
 }
 
+export function isSkillName(name) {
+  return (
+    typeof name === "string" &&
+    name.length > 0 &&
+    name !== "." &&
+    name !== ".." &&
+    path.basename(name) === name &&
+    !name.includes("/") &&
+    !name.includes("\\")
+  );
+}
+
 function report({ code, out, err }) {
   const body = [out.trim(), err.trim()].filter(Boolean).join("\n") || "(no output)";
   return {
@@ -145,6 +157,12 @@ server.registerTool(
         ? skills.map((s) => `- ${s.name} — ${s.description}`).join("\n")
         : "No skills found. Run webcmd_setup first.";
       return { content: [{ type: "text", text }] };
+    }
+    if (!isSkillName(name)) {
+      return {
+        content: [{ type: "text", text: "Invalid skill name. Use a single folder name." }],
+        isError: true,
+      };
     }
     const file = path.join(SKILLS_DIR, name, "SKILL.md");
     if (!existsSync(file)) {

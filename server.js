@@ -98,7 +98,7 @@ export function exec(cmd, args, { cwd, timeout = 120000 } = {}) {
       clearTimeout(timer);
       const err = errBuf.toString();
       resolve({
-        code,
+        code: timedOut || code == null ? 1 : code,
         out: outBuf.toString(),
         err: timedOut ? `${err}\n[timed out after ${timeout}ms]` : err,
       });
@@ -119,10 +119,11 @@ export function isSkillName(name) {
 }
 
 function report({ code, out, err }) {
+  const exit = code ?? 1;
   const body = [out.trim(), err.trim()].filter(Boolean).join("\n") || "(no output)";
   return {
-    content: [{ type: "text", text: clip(code === 0 ? body : `exit ${code}\n${body}`) }],
-    isError: code !== 0,
+    content: [{ type: "text", text: clip(exit === 0 ? body : `exit ${exit}\n${body}`) }],
+    isError: exit !== 0,
   };
 }
 

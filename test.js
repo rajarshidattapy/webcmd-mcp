@@ -32,6 +32,7 @@ assert.ok(huge.out.length < 100000);
 assert.match(huge.out, /truncated 140000 chars/);
 const slow = await exec(process.execPath, ["-e", "setInterval(()=>{},1000)"], { timeout: 300 });
 assert.match(slow.err, /timed out/);
+assert.equal(slow.code, 1);
 
 // timeout must kill grandchildren (cmd shim / browser children), not just the top PID
 const marker = path.join(os.tmpdir(), `webcmd-mcp-grandchild-${process.pid}`);

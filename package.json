@@ -1,0 +1,31 @@
+{
+  "name": "@agentrhq/webcmd-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for Webcmd — make any website your CLI, from any coding agent.",
+  "type": "module",
+  "bin": {
+    "webcmd-mcp": "server.js"
+  },
+  "files": [
+    "server.js",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node test.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "cross-spawn": "^7.0.6",
+    "zod": "^4.4.3"
+  },
+  "keywords": [
+    "mcp",
+    "webcmd",
+    "browser",
+    "agent"
+  ],
+  "license": "MIT"
+}

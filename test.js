@@ -1,0 +1,41 @@
+import assert from "node:assert/strict";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { clip, exec } from "./server.js";
+
+// clip: passthrough under the limit, head+tail above it
+assert.equal(clip("short"), "short");
+const big = clip("x".repeat(100000));
+assert.ok(big.length < 100000 && big.includes("truncated 40000 chars"));
+
+// exec: exit code, stdout, stderr, missing binary, timeout
+assert.deepEqual(
+  await exec(process.execPath, ["-e", "console.log('hi')"]),
+  { code: 0, out: "hi\n", err: "" },
+);
+const failed = await exec(process.execPath, ["-e", "console.error('bad');process.exit(3)"]);
+assert.equal(failed.code, 3);
+assert.match(failed.err, /bad/);
+assert.equal((await exec("definitely-not-a-real-binary-xyz", [])).code, -1);
+const slow = await exec(process.execPath, ["-e", "setInterval(()=>{},1000)"], { timeout: 300 });
+assert.match(slow.err, /timed out/);
+
+// end to end over stdio: the three tools are exposed and webcmd_run reaches the CLI
+const client = new Client({ name: "test", version: "0" });
+await client.connect(
+  new StdioClientTransport({ command: process.execPath, args: ["server.js"] }),
+);
+const names = (await client.listTools()).tools.map((t) => t.name).sort();
+assert.deepEqual(names, ["webcmd_run", "webcmd_setup", "webcmd_skill"]);
+
+const version = await client.callTool({ name: "webcmd_run", arguments: { args: ["--version"] } });
+assert.match(version.content[0].text, /\d+\.\d+\.\d+/);
+
+const unknown = await client.callTool({ name: "webcmd_skill", arguments: { name: "nope" } });
+assert.equal(unknown.isError, true);
+
+const usage = await client.callTool({ name: "webcmd_skill", arguments: { name: "webcmd-usage" } });
+assert.match(usage.content[0].text, /name: webcmd-usage/);
+
+await client.close();
+console.log("ok");
